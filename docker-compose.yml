@@ -1,0 +1,91 @@
+version: "3.6"
+
+services:
+
+  mongo:
+    image: mongo
+    restart: always
+    container_name: bank-db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${DB_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${DB_PASS}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db/
+    networks:
+      - bank
+
+  mongo-express:
+    image: mongo-express
+    restart: always
+    ports:
+      - 8081:8081
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${DB_USER}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${DB_PASS}
+      ME_CONFIG_MONGODB_URL: mongodb://${DB_USER}:${DB_PASS}@mongo:27017/
+    networks:
+      - bank
+
+  api:
+    build: ""
+    command: >
+      sh -c "python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - .:/code
+    container_name: bank-api
+    ports:
+      - "8000:8000"
+    environment:
+      - ALLOWED_HOSTS=*
+      - CORS_ORIGIN_WHITELIST=http://localhost:8080,http://localhost:8000
+      - DB_HOST=${DB_HOST}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASS=${DB_PASS}
+      - DB_PORT=${DB_PORT}
+    depends_on:
+      - mongo
+    networks:
+      - bank
+
+  rabbitmq:
+    image: rabbitmq:3.9.13-management-alpine
+    container_name: bank-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - 'rabbitmq_data:/bank/rabbitmq'
+    networks:
+      - bank
+
+  worker:
+    build: .
+    container_name: worker-bank
+    command: >
+      sh -c "celery -A worker_celery worker  --loglevel="INFO" --beat"
+    environment:
+      - BROKER_HOST=rabbitmq
+      - BROKER_USER=guest
+      - BROKER_PASS=guest
+      - BROKER_PORT=5672
+      - QUEUE=events_queue
+      - ROUTING_KEY=events
+      - CELERY_BROKER_URL=amqp://rabbitmq:5672
+
+    depends_on:
+      - api
+
+    volumes:
+      - .:/app
+    networks:
+      - bank
+
+volumes:
+  mongo_data:
+
+networks:
+  bank:
+    name: bank
